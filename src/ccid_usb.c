@@ -814,6 +814,8 @@ status_t WriteUSB(unsigned int reader_index, unsigned int length,
 status_t ReadUSB(unsigned int reader_index, unsigned int * length,
 	unsigned char *buffer)
 {
+#define READUSB_MAX_ATTEMPTS 3
+	int attempt = 0;
 	int rv;
 	int actual_length;
 	char debug_header[] = "<- 121234 ";
@@ -821,6 +823,8 @@ status_t ReadUSB(unsigned int reader_index, unsigned int * length,
 	int duplicate_frame = 0;
 
 read_again:
+	actual_length = -1;
+
 	(void)snprintf(debug_header, sizeof(debug_header), "<- %06X ",
 		(int)reader_index);
 
@@ -830,6 +834,19 @@ read_again:
 
 	if (rv < 0)
 	{
+		if (LIBUSB_ERROR_TIMEOUT == rv && actual_length == 0)
+		{
+			/* zero-length packet, drop it and try again
+			 * not sure why this is reported as timeout and not as success (http://libusb.org/static/api-1.0/group__syncio.html#gab8ae853ab492c22d707241dc26c8a805)
+			 */
+			attempt++;
+			DEBUG_INFO5("read zero-length (%d/%d): attempt %d of %d",
+				usbDevice[reader_index].bus_number,
+				usbDevice[reader_index].device_address, attempt, READUSB_MAX_ATTEMPTS);
+			if (READUSB_MAX_ATTEMPTS != attempt)
+				goto read_again;
+		}
+
 		*length = 0;
 		DEBUG_CRITICAL5("read failed (%d/%d): %d %s",
 			usbDevice[reader_index].bus_number,
@@ -856,6 +873,7 @@ read_again:
 			return STATUS_UNSUCCESSFUL;
 		}
 		DEBUG_INFO1("Duplicate frame detected");
+		attempt = 0;
 		goto read_again;
 	}
 
